@@ -1,0 +1,10 @@
+vllm
+torch
+transformers
+protobuf
+tokenizers
+prometheus_client
+grpcio==1.65.5
+grpcio-tools==1.65.5
+grpcio-reflection==1.65.5
+grpcio-health-checking==1.65.5

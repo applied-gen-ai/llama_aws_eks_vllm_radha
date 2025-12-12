@@ -1,0 +1,11 @@
+run_tag=test_run4
+target=k8s-default-llmservi-4e1d9e50a6-250a80bf4b757563.elb.us-east-1.amazonaws.com:50051
+concurrency=1000
+requests_per_client=1
+total_requests=1000
+successful_requests=1000
+p50_ttft=25.188
+p95_ttft=49.907
+p99_ttft=49.984
+throughput=14.72
+duration=67.94

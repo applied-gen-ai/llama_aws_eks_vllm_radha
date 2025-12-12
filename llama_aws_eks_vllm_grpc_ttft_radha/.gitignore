@@ -1,0 +1,170 @@
+# ====================
+# Terraform
+# ====================
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.plan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# ====================
+# Python
+# ====================
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# PyCharm
+.idea/
+
+# ====================
+# Environment & Secrets
+# ====================
+.env
+.env.*
+.env.local
+.env.production
+secrets.tf
+secrets.yaml
+*.pem
+*.key
+*.crt
+*.p12
+
+# ====================
+# Kubernetes
+# ====================
+kubeconfig
+*.kubeconfig
+kube-config
+
+# ====================
+# Docker
+# ====================
+.dockerignore
+
+# ====================
+# Model Files (Large ML Files)
+# ====================
+*.bin
+*.pth
+*.ckpt
+*.safetensors
+*.h5
+*.pb
+*.onnx
+*.tflite
+*.joblib
+*.pkl
+*.pickle
+
+# Hugging Face cache
+.cache/
+models/
+checkpoints/
+
+# ====================
+# Logs & Databases
+# ====================
+*.log
+*.sql
+*.sqlite
+*.db
+
+# ====================
+# IDE & Editors
+# ====================
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+*~
+*.sublime-project
+*.sublime-workspace
+
+# ====================
+# OS Generated Files
+# ====================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+Icon?
+
+# ====================
+# Archives & Packages
+# ====================
+*.zip
+*.tar
+*.tar.gz
+*.rar
+*.7z
+
+# ====================
+# Node (if using any JS tools)
+# ====================
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# ====================
+# AWS
+# ====================
+.aws/
+credentials
+
+# ====================
+# Build artifacts
+# ====================
+*.o
+*.a
+*.so
+*.exe
+*.dll

@@ -1,0 +1,46 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: llm-hpa
+  namespace: default
+  labels:
+    app: llm
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: llm-deployment
+
+  # --- Scaling boundaries ---
+  minReplicas: 1
+  maxReplicas: 3
+
+  # --- Metric to watch ---
+  metrics:
+    - type: Pods
+      pods:
+        metric:
+          name: llm_request_queue_length     # Must match Prometheus Adapter metric
+        target:
+          type: AverageValue
+          averageValue: "1"                  # Scale out if avg queue length > 1 per pod
+
+  # --- Scaling behavior tuning ---
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 15          # Wait 15s before scaling up (avoid oscillation)
+      selectPolicy: Max
+      policies:
+        - type: Percent
+          value: 100                         # Can double replicas per step
+          periodSeconds: 30
+        - type: Pods
+          value: 2                           # Or add 2 pods at a time
+          periodSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 30
+      selectPolicy: Max
+      policies:
+        - type: Percent
+          value: 50                          # Reduce by at most 50%
+          periodSeconds: 60

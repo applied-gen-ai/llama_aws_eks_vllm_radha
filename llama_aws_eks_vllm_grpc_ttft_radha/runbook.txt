@@ -1,0 +1,457 @@
+Complete EKS vLLM gRPC Deployment Runbook (Updated 2025)
+
+---
+
+Step 0 – AWS Configuration (Prerequisites)
+
+Before running Terraform, ensure AWS CLI and credentials are configured locally.
+```
+aws --version                     # Should show AWS CLI version 2.x
+aws configure                      # Interactively set credentials
+
+```
+When prompted, enter:
+- AWS Access Key ID: (from IAM → Security Credentials)
+- AWS Secret Access Key: (only shown once when created)
+- Default region: us-east-1
+- Default output format: json
+Verify identity:
+```
+aws sts get-caller-identity
+
+```
+ Expected:
+```
+{
+  "UserId": "AIDAXXXXXXXXXXXXXXXX",
+  "Account": "123456789012",
+  "Arn": "arn:aws:iam::123456789012:user/your-username"
+}
+
+```
+
+---
+
+Step 1 – Build & Push Docker Image
+
+Package your vLLM gRPC server into a container.
+```
+docker login
+docker build -t radha2990/stablelm-api-vllm-grpc:latest .
+docker push radha2990/stablelm-api-vllm-grpc:latest
+
+```
+For updates:
+```
+docker build -t radha2990/stablelm-api-vllm-grpc:latest .
+docker push radha2990/stablelm-api-vllm-grpc:latest
+
+kubectl scale deploy/llm-deployment --replicas=0
+kubectl wait --for=delete pod -l app=llm --timeout=90s
+kubectl set image deploy/llm-deployment llm=radha2990/stablelm-api-vllm-grpc:latest
+kubectl scale deploy/llm-deployment --replicas=1
+kubectl rollout status deployment/llm-deployment
+kubectl get pods
+
+```
+
+---
+
+Step 2 – Provision EKS Cluster with Terraform
+
+```
+terraform init
+terraform plan -out infra.plan
+terraform apply "infra.plan"
+
+```
+ ~15–20 min
+Creates VPC, EKS Cluster (llm-eks-cluster), GPU NodeGroup (g5.2xlarge).
+---
+
+Step 3 – Deploy Core Components
+
+
+3.1 Connect kubectl to EKS
+
+```
+aws eks update-kubeconfig --region us-east-1 --name llm-eks-cluster
+kubectl get nodes
+
+```
+
+---
+
+3.2 Install NVIDIA Device Plugin
+
+```
+kubectl apply -f k8s-addons/nvidia-device-plugin.yml
+kubectl get pods -n kube-system -l name=nvidia-device-plugin-ds
+
+```
+
+---
+
+3.3 Install AWS Load Balancer Controller
+
+```
+python install_albc.py
+
+```
+Verify:
+```
+kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
+
+```
+
+---
+
+3.4 Deploy vLLM Application
+
+```
+kubectl apply -f deployment/llm-deployment.yaml
+kubectl apply -f deployment/llm-service.yaml
+kubectl get pods -w
+kubectl get svc llm-service
+# Update LLM_TARGET variable in .env file with the EXTERNAL-IP we got here.
+
+
+kubectl rollout restart deployment llm-deployment
+
+
+kubectl exec -it <llm-pod-name> -- python3 -c "from vllm.engine.async_llm_engine import AsyncLLMEngine; print(AsyncLLMEngine._max_num_requests)"
+
+kubectl exec -it llm-deployment-655668887c-k5vfn -- python3 -c "from vllm.engine.async_llm_engine import AsyncLLMEngine; print(AsyncLLMEngine._max_num_requests)"
+
+```
+ Expected Service:
+```
+llm-service  LoadBalancer  10.x.x.x  k8s-default-llmservi-xxxxx.elb.us-east-1.amazonaws.com
+
+```
+Access:
+- gRPC → grpc://<EXTERNAL-IP>:50051
+- Metrics → http://<EXTERNAL-IP>:8000/metrics
+kubectl port-forward svc/llm-service 8000:8000
+http://localhost:8000/metrics
+
+---
+
+Step 4 – Install Metrics Server
+
+```
+kubectl apply -f k8s-addons/metrics-server.yaml
+kubectl rollout restart deployment metrics-server -n kube-system
+sleep 30
+kubectl top pods
+kubectl top nodes
+
+```
+
+kubectl port-forward svc/llm-service 8000:8000
+
+# Key metrics available at http://localhost:8000/metrics
+
+vllm:num_requests_waiting          # Requests in vLLM's waiting queue
+vllm:num_requests_running          # Currently executing requests
+vllm:num_requests_swapped          # Requests swapped out due to memory pressure
+vllm:gpu_cache_usage_perc          # KV cache utilization
+vllm:num_preemptions_total         # How often requests get preempted
+
+.\test\vllm_live_metrics.ps1
+
+---
+
+Step 5 – Deploy DCGM Exporter (GPU Monitoring)
+
+```
+kubectl apply -f k8s-addons/dcgm-exporter.yaml
+kubectl get pods -n kube-system -l app=dcgm-exporter
+
+```
+Check metrics:
+```
+kubectl port-forward -n kube-system ds/dcgm-exporter 9400:9400
+
+#In another terminal 
+while ($true) { (Invoke-WebRequest -Uri "http://localhost:9400/metrics").Content -split "`n" | Where-Object {$_ -match "DCGM_FI_DEV_GPU_UTIL" -and $_ -notmatch "^#"} | ForEach-Object {($_ -replace "{.*}","")}; Start-Sleep -Seconds 2 }
+
+
+while ($true) { (Invoke-WebRequest -Uri "http://localhost:9400/metrics").Content -split "`n" | Where-Object {$_ -match "DCGM_FI_DEV_GPU_TEMP|DCGM_FI_DEV_GPU_UTIL" -and $_ -notmatch "^#"} | ForEach-Object {($_ -replace "{.*}","")}; Start-Sleep -Seconds 2 }
+
+```
+Prometheus will later scrape:
+- DCGM_FI_DEV_GPU_UTIL
+- DCGM_FI_DEV_GPU_TEMP
+- DCGM_FI_DEV_FB_USED
+---
+
+Step 6 – Deploy Prometheus
+
+```
+kubectl apply -f k8s-addons/prometheus.yaml
+kubectl get pods -n monitoring
+kubectl port-forward -n monitoring deploy/prometheus 9090:9090
+
+
+```
+
+./test/prometheus_live_monitor.ps1
+
+
+
+Open  
+http://localhost:9090
+http://localhost:9090/targets
+Try queries:
+```
+llm_requests_in_flight
+llm_request_queue_length
+DCGM_FI_DEV_GPU_UTIL
+
+```
+* llm_request_queue_length → autoscaling metric
+* DCGM_FI_DEV_GPU_UTIL → GPU monitoring only
+---
+```
+Check Targets in Prometheus UI:
+- vllm → llm-service.default.svc.cluster.local:8000
+- dcgm → dcgm-exporter.kube-system.svc.cluster.local:9400
+---
+
+Step 7 – Deploy Prometheus Adapter (Custom Metrics Bridge)
+
+Publishes Prometheus metrics to Kubernetes Custom Metrics API → used by HPA.
+```
+# 7.1 Apply base infrastructure
+kubectl apply -f k8s-addons/prometheus-adapter-base.yaml
+
+# 7.2 Apply custom behavior (ConfigMap + Deployment)
+kubectl apply -f k8s-addons/prometheus-adapter-custom.yaml
+
+kubectl get pods -n custom-metrics
+sleep 30
+
+```
+Verify API Registration:
+```
+kubectl get --raw "/apis/custom.metrics.k8s.io/v1beta1"
+kubectl get --raw "/apis/custom.metrics.k8s.io/v1beta1" | grep llm_request_queue_length
+
+```
+Query metric:
+```
+kubectl get --raw "/apis/custom.metrics.k8s.io/v1beta1/namespaces/default/pods/*/llm_request_queue_length"
+
+```
+ Expected:
+```
+{"metricName":"llm_request_queue_length","value":"0"}
+
+```
+Components
+File
+Purpose
+prometheus-adapter-base.yaml
+Namespace + RBAC + Service + APIService
+prometheus-adapter-custom.yaml
+ConfigMap rules + Deployment
+Apply order: base → custom.
+Base defines namespace/RBAC that custom depends on.
+---
+
+Step 8 – Apply HPA (Queue-Based Autoscaling)
+
+```
+kubectl apply -f deployment/llm-hpa.yaml
+kubectl get hpa -w
+
+```
+HPA scales when average llm_request_queue_length > 3.
+---
+
+Step 9 – Deploy Cluster Autoscaler
+
+```
+kubectl apply -f k8s-addons/cluster-autoscaler.yaml
+kubectl get pods -n kube-system | grep autoscaler
+kubectl logs -f deployment/cluster-autoscaler -n kube-system
+
+```
+Cluster Autoscaler adds/removes GPU nodes based on pending pods.
+---
+
+Step 10 – Load Testing (Validate Autoscaling)
+
+Single test:
+```
+python test/test_client.py
+
+```
+Load test with Locust:
+```
+locust -f test/locustfile.py
+
+```
+Monitor:
+```
+kubectl get hpa -w
+kubectl get pods -w
+kubectl get nodes -w
+
+```
+
+---
+
+Step 11 – Monitor with Prometheus / Grafana
+
+```
+kubectl port-forward -n monitoring deploy/prometheus 9090:9090
+
+```
+Prometheus queries:
+```
+llm_request_queue_length
+llm_requests_in_flight
+histogram_quantile(0.95, rate(llm_ttft_ms_bucket[5m]))
+DCGM_FI_DEV_GPU_UTIL
+DCGM_FI_DEV_GPU_TEMP
+
+```
+(Optional) Grafana:
+```
+helm repo add grafana https://grafana.github.io/helm-charts
+helm install grafana grafana/grafana -n monitoring
+kubectl port-forward -n monitoring svc/grafana 3000:80
+
+```
+
+---
+
+Step 12 – Cleanup (Avoid GPU Costs)
+
+ g5.2xlarge ≈ $1.21/hour — always tear down after testing.
+```
+# Delete HPA and Cluster Autoscaler first
+kubectl delete -f k8s-addons/cluster-autoscaler.yaml
+kubectl delete -f deployment/llm-hpa.yaml
+
+# Delete monitoring stack (updated)
+kubectl delete -f k8s-addons/prometheus-adapter-custom.yaml
+kubectl delete -f k8s-addons/prometheus-adapter-base.yaml
+kubectl delete -f k8s-addons/prometheus.yaml
+kubectl delete -f k8s-addons/dcgm-exporter.yaml
+
+# Delete Metrics Server
+kubectl delete -f k8s-addons/metrics-server.yaml
+
+# Clean remaining Kubernetes objects
+.\cleanup.ps1
+
+```
+Destroy AWS resources:
+```
+terraform destroy -auto-approve
+
+```
+
+---
+
+Autoscaling Architecture Overview
+
+```
+vLLM Pod
+ ├─ llm_request_queue_length  →  Prometheus → Adapter → Custom Metrics API → HPA
+ ├─ llm_requests_in_flight    →  Prometheus
+ └─ vllm_internal_waiting_requests  (internal)
+GPU Metrics → DCGM Exporter → Prometheus (visibility only)
+
+```
+HPA scales pods based on queue length;
+Cluster Autoscaler adds nodes if pods Pending.
+---
+
+ Common Issues
+
+Pods Pending
+```
+kubectl describe pod <pod>
+
+```
+→ wait for Cluster Autoscaler to add nodes.
+HPA  Metrics
+```
+kubectl get pods -n custom-metrics
+kubectl get --raw "/apis/custom.metrics.k8s.io/v1beta1" | grep llm
+kubectl logs -n custom-metrics -l app=prometheus-adapter
+
+```
+Fix: Restart adapter deployment if ConfigMap updated.
+---
+
+ Production Checklist
+
+-  IRSA for IAM
+-  EKS control plane logging
+-  CloudWatch alerts
+-  Resource limits
+-  Grafana dashboards
+-  Secrets in AWS Secrets Manager
+-  Disaster recovery testing
+---
+
+ References
+
+- AWS Load Balancer Controller Docs
+- vLLM Documentation
+- Prometheus Operator
+- EKS Best Practices
+- Kubernetes HPA Guide
+---
+
+
+
+
+# 1 Apply your updated YAML
+kubectl apply -f deployment/llm-deployment.yaml
+
+# 2 Force pods to restart (reload new env)
+kubectl rollout restart deployment llm-deployment
+
+
+# 3 Wait for rollout to complete
+kubectl rollout status deployment llm-deployment
+
+kubectl get pods
+
+
+kubectl delete pods <pod-name> # delete the previously running pod, not the one now in pending.
+
+kubectl rollout status deployment llm-deployment
+
+# 4 Verify new pods are running
+kubectl get pods -l app=llm
+
+# 5 (Optional) Confirm the env var inside pod
+kubectl exec -it <pod-name> -- printenv | grep MAX_INFLIGHT
+
+
+kubectl exec -it llm-deployment-7fd4c5bbf4-45qth -- printenv | grep MAX_INFLIGHT
+
+
+
+
+
+python test/client_measure_ttft_grpc.py 16 10 "What is Kubernetes?" 64 run1
+python test/client_measure_ttft_grpc.py 500 5 "Explain AI" 128 run3
+python test/analyze_results_grpc.py results_run1.csv
+python test/analyze_results_grpc.py results_run1.csv results_run2.csv
+
+
+
+
+
+
+
+python test/client_measure_ttft_grpc.py 100 4 "What is Kubernetes?" 64 "test_run8"
+python test/analyze_results_grpc.py .\results

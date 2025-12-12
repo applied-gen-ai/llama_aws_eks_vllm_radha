@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: llm-metrics
+  namespace: custom-metrics   #  same namespace where prometheus-adapter runs
+  labels:
+    release: prometheus       #  must match your Prometheus release label (check via `kubectl get servicemonitor -A`)
+spec:
+  namespaceSelector:
+    matchNames:
+      - default               #  where your llm pods/services are running
+  selector:
+    matchLabels:
+      app: llm                #  matches the label in your llm-service.yaml
+  endpoints:
+    - port: metrics           #  must match the port name in llm-service.yaml
+      interval: 5s
+      path: /metrics
+      scheme: http

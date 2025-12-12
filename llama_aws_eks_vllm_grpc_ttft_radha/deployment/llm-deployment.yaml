@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llm
+  template:
+    metadata:
+      labels:
+        app: llm
+      annotations:
+        rollme: "stableai-v1.14" # bump this on image/model changes to force a rollout
+        # If you are NOT using Prometheus Operator (ServiceMonitor), you can
+        # uncomment the next three lines to let Prometheus scrape directly:
+        # prometheus.io/scrape: "true"
+        # prometheus.io/port: "8000"
+        # prometheus.io/path: "/metrics"
+    spec:
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+      containers:
+        - name: llm
+          image: radha2990/stablelm-api-vllm-grpc:latest   # update to your latest pushed image
+          ports:
+            - name: grpc
+              containerPort: 50051
+            - name: metrics            # <— Prometheus metrics exporter from server.py
+              containerPort: 8000
+          startupProbe:
+            tcpSocket: { port: 50051 }
+            periodSeconds: 5
+            failureThreshold: 120   # allow long model warm-up
+          readinessProbe:
+            tcpSocket: { port: 50051 }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 12    # ~1 min grace
+          livenessProbe:
+            tcpSocket: { port: 50051 }
+            initialDelaySeconds: 120
+            periodSeconds: 10
+            failureThreshold: 3
+          env:
+            - name: GRPC_PORT
+              value: "50051"
+            - name: METRICS_PORT        # <— matches start_http_server(...) in server.py
+              value: "8000"
+            - name: MAX_INFLIGHT        # <— bounded concurrency per pod (tune per GPU/model)
+              value: "384"
+            # Optionally set model/runtime knobs here:
+            # - name: MODEL_ID
+            #   value: "stabilityai/stablelm-3b-4e1t"
+            # - name: DTYPE
+            #   value: "float16"
+            # - name: TENSOR_PARALLEL_SIZE
+            #   value: "1"
+          resources:
+            requests:
+              memory: "16Gi"
+              cpu: "4"
+            limits:
+              nvidia.com/gpu: 1
+              memory: "24Gi"
+              cpu: "6"

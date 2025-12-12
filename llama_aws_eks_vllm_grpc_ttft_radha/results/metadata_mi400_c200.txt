@@ -1,0 +1,11 @@
+run_tag=mi400_c200
+target=k8s-default-llmservi-4e1d9e50a6-250a80bf4b757563.elb.us-east-1.amazonaws.com:50051
+concurrency=200
+requests_per_client=10
+total_requests=2000
+successful_requests=2000
+p50_ttft=0.609
+p95_ttft=0.813
+p99_ttft=0.984
+throughput=5.45
+duration=366.86

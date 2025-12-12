@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-service
+  namespace: default
+  labels:
+    app: llm
+  annotations:
+    # --- AWS Load Balancer configuration ---
+    # Request a Network Load Balancer instead of CLB (faster, cheaper, supports TCP)
+    service.kubernetes.io/aws-load-balancer-type: "nlb"
+
+    # Route directly to pod IPs instead of nodeports (simplifies security groups)
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
+
+    # Make it internet-facing (public). Use "internal" for private VPC-only access.
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+
+    # Optional: health check configuration (can help with NLB pod health)
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: "TCP"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: "50051"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-interval: "10"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-timeout: "5"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-unhealthy-threshold: "3"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-healthy-threshold: "2"
+
+    # Optional Prometheus hints if you’re not using ServiceMonitor
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+    prometheus.io/path: "/metrics"
+
+spec:
+  type: LoadBalancer
+  selector:
+    app: llm
+
+  ports:
+    # --- Public gRPC endpoint exposed through AWS NLB ---
+    - name: grpc
+      port: 50051            # External port exposed via NLB
+      targetPort: 50051      # Container port used by gRPC server
+      protocol: TCP
+
+    # --- Internal metrics endpoint (Prometheus scrape) ---
+    - name: metrics
+      port: 8000             # Internal Prometheus scraping port
+      targetPort: 8000       # Container port for Prometheus client metrics
+      protocol: TCP
+
+  # Use Cluster so traffic is load-balanced across pods even on different nodes
+  externalTrafficPolicy: Cluster

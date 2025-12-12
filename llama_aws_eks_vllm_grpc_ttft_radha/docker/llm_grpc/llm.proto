@@ -1,0 +1,22 @@
+syntax = "proto3";
+package llm.v1;
+
+service LLM {
+  rpc Generate(GenerateRequest) returns (GenerateReply);
+  rpc StreamGenerate(GenerateRequest) returns (stream Token);
+}
+
+message GenerateRequest {
+  string prompt = 1;
+  int32  max_new_tokens = 2;
+  float  temperature    = 3;
+}
+
+message GenerateReply {
+  string text = 1;
+}
+
+message Token {
+  string text   = 1;
+  bool   is_last = 2;
+}

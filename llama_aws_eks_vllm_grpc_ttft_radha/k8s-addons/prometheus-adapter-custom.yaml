@@ -1,0 +1,97 @@
+# ============================================================
+# FILE: /k8s-addons/prometheus-adapter-custom.yaml
+# PURPOSE: Customizable behavior — ConfigMap rules and Deployment
+# ============================================================
+
+# ============================================================
+# CONFIGMAP (metric mapping logic)
+# ============================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: adapter-config
+  namespace: custom-metrics
+data:
+  config.yaml: |
+    rules:
+      - seriesQuery: 'llm_request_queue_length{job="vllm"}'
+        resources:
+          overrides:
+            pod:
+              resource: pod
+            namespace:
+              resource: namespace
+        name:
+          matches: "llm_request_queue_length"
+          as: "llm_request_queue_length"
+        metricsQuery: 'avg(llm_request_queue_length{job="vllm"}) by (namespace, pod)'
+
+
+
+
+# apiVersion: v1
+# kind: ConfigMap
+# metadata:
+#   name: adapter-config
+#   namespace: custom-metrics
+# data:
+#   config.yaml: |
+#     rules:
+#       # Customize this section if you add or change metric mappings
+#       - seriesQuery: 'llm_request_queue_length{job="vllm"}'
+#         resources:
+#           overrides:
+#             instance:
+#               resource: pod
+#         name:
+#           matches: "llm_request_queue_length"
+#           as: "llm_request_queue_length"
+#         metricsQuery: 'avg(llm_request_queue_length{job="vllm"}) by (<<.GroupBy>>)'
+# ============================================================
+# DEPLOYMENT (Prometheus Adapter runtime configuration)
+# ============================================================
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus-adapter
+  namespace: custom-metrics
+spec:
+  selector:
+    matchLabels:
+      app: prometheus-adapter
+  template:
+    metadata:
+      labels:
+        app: prometheus-adapter
+    spec:
+      serviceAccountName: prometheus-adapter
+      containers:
+        - name: prometheus-adapter
+          image: registry.k8s.io/prometheus-adapter/prometheus-adapter:v0.10.0
+          args:
+            #  Update this URL if your Prometheus service name or namespace changes
+            - "--prometheus-url=http://prometheus.monitoring.svc.cluster.local:9090"
+            #  Change this if you want to adjust how often metrics are reloaded
+            - "--metrics-relist-interval=30s"
+            #  Adjust log verbosity (0–10)
+            - "--v=4"
+            - "--config=/etc/adapter/config.yaml"
+            - "--secure-port=6443"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/adapter
+              readOnly: true
+            - name: local-config
+              mountPath: /apiserver.local.config
+            - name: tmp-dir
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: adapter-config
+        - name: local-config
+          emptyDir: {}
+        - name: tmp-dir
+          emptyDir: {}
